@@ -44,8 +44,8 @@ test('uma reserva legada sem metadados também deixa de bloquear o estúdio',()=
   const {state,p}=ready();p.scenes[0].operation='useapi/job-old';p.scenes[0].status='generating';
   assert.equal(c.migrateVideoConnector(state),true);assert.equal(p.scenes[0].operation,undefined);assert.equal(p.scenes[0].status,'draft');
 });
-test('limpeza de conta antiga não interrompe geração da Gemini API',()=>{
-  const {state,p}=ready();state.flowConnection={email:'old@example.com'};
-  const scene=p.scenes[0];Object.assign(scene,{status:'generating',operation:'interactions/current',generationProvider:'gemini',generationFileUri:'https://storage.googleapis.com/current'});
-  const before=structuredClone(scene);assert.equal(c.migrateVideoConnector(state),true);assert.deepEqual(scene,before);assert.equal(c.migrateVideoConnector(state),false);
+test('a retirada da geração direta arquiva também reservas Gemini sem apagar os clipes',()=>{
+  const {state,p}=ready();p.flowProjectUrl='https://labs.google/fx/tools/flow/old';
+  const scene=p.scenes[0];Object.assign(scene,{status:'generating',operation:'interactions/current',generationProvider:'gemini',generationFileUri:'https://storage.googleapis.com/current',video:{id:'previous-clip'}});
+  assert.equal(c.migrateVideoConnector(state),true);assert.equal(scene.operation,undefined);assert.equal(scene.status,'stale');assert.equal(scene.video.id,'previous-clip');assert.equal(scene.generationHistory[0].operation,'interactions/current');assert.ok(!('flowProjectUrl' in p));assert.ok(!('generationProvider' in scene));assert.equal(c.migrateVideoConnector(state),false);
 });

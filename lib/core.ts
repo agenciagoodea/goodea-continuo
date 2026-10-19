@@ -10,8 +10,8 @@ export type ReferenceAnalysis = {at:string;fileIds:string[];uncertainties:string
 export type Element = { id: string; kind: "character" | "environment"; name: string; rules: string; palette: string; voice: string; voiceId: string; files: FileRef[]; approved: boolean; version: number; visualDetails?:VisualDetails;analysis?:ReferenceAnalysis };
 export type Line = { speaker: string; text: string; type: "dialogue" | "narration" };
 export const checks = ["Identidade e roupas", "Quantidade de personagens", "Ações e falas do roteiro", "Ligação com a cena anterior", "Vozes e sincronização", "Cenário, luz e áudio"];
-export type Scene = { id: string; title: string; duration: number; environment: string; characters: string[]; action: string; camera: string; lines: Line[]; sound: string; transition: "continue" | "cut"; video?: FileRef; firstFrame?: FileRef; lastFrame?: FileRef; audio?: FileRef; actualDuration?: number; width?: number; height?: number; status: "draft" | "review" | "approved" | "stale" | "generating"; checked: boolean[]; notes: string; attempts: { video: FileRef; createdAt: string }[]; operation?: string; generationError?: string; generationFileUri?:string; generationModel?:string;generationProvider?:"gemini"; generationHistory?:{operation:string;model?:string;at:string}[]; audit?: { verdict: string; findings: string[]; createdAt: string }; approvedAt?: string };
-export type Project = { id: string; name: string; script: string; flowProjectUrl?:string; aspect: "16:9" | "9:16"; style: string; rules: string; palette: string; scenes: Scene[]; music?: FileRef; narration?: FileRef; musicVolume: number; muteOriginal: boolean; createdAt: string };
+export type Scene = { id: string; title: string; duration: number; environment: string; characters: string[]; action: string; camera: string; lines: Line[]; sound: string; transition: "continue" | "cut"; video?: FileRef; firstFrame?: FileRef; lastFrame?: FileRef; audio?: FileRef; actualDuration?: number; width?: number; height?: number; status: "draft" | "review" | "approved" | "stale" | "generating"; checked: boolean[]; notes: string; attempts: { video: FileRef; createdAt: string }[]; operation?: string; generationError?: string; generationFileUri?:string; generationModel?:string;generationHistory?:{operation:string;model?:string;at:string}[]; audit?: { verdict: string; findings: string[]; createdAt: string }; approvedAt?: string };
+export type Project = { id: string; name: string; script: string; aspect: "16:9" | "9:16"; style: string; rules: string; palette: string; scenes: Scene[]; music?: FileRef; narration?: FileRef; musicVolume: number; muteOriginal: boolean; createdAt: string };
 export type State = { elements: Element[]; projects: Project[]; selectedProject: string; revision: number; events: { at: string; text: string }[];videoProfile?:string;referenceReadings?:ReferenceReading[] };
 export const uid = () => crypto.randomUUID();
 export const emptyScene = (title = "Nova cena"): Scene => ({id:uid(),title,duration:VIDEO_DURATION,environment:"",characters:[],action:"",camera:"Plano médio, movimento suave",lines:[],sound:"Som ambiente discreto. Sem trilha musical gerada por cena.",transition:"continue",status:"draft",checked:checks.map(()=>false),notes:"",attempts:[]});
@@ -94,30 +94,26 @@ export function invalidate(p:Project,from:number){for(let i=from;i<p.scenes.leng
 export function sceneContent(s:Scene){const {id,title,duration,environment,characters,action,camera,lines,sound,transition}=s;return JSON.stringify({id,title,duration,environment,characters,action,camera,lines,sound,transition});}
 export function seconds(n:number){return `${Math.floor(n/60).toString().padStart(2,"0")}:${Math.round(n%60).toString().padStart(2,"0")}`;}
 
-// Clean saved metadata from the retired connector without contacting any provider.
+// Retire stored video connections and reservations without contacting providers.
 export function migrateVideoConnector(state:State):boolean{
   let changed=false;
   const remove=(value:object,keys:string[])=>{const data=value as Record<string,unknown>;for(const key of keys)if(Object.hasOwn(data,key)){delete data[key];changed=true;}};
   remove(state,["videoProvider","flowConnection","flowAssets"]);
   for(const element of state.elements)remove(element,["flowVoice"]);
   for(const project of state.projects){
+    remove(project,["flowProjectUrl"]);
     for(const scene of project.scenes){
-      const data=scene as unknown as Record<string,unknown>;
-      // The prefix is recognized only to release legacy reservations on upgrade.
-      const retired=Object.hasOwn(data,"flowSubmission")||Object.hasOwn(data,"flowMediaId")||
-        (typeof data.generationProvider==="string"&&data.generationProvider!=="gemini")||scene.operation?.startsWith("useapi/");
-      if(retired&&(scene.operation||scene.status==="generating")){
+      if(scene.operation||scene.status==="generating"){
         if(scene.operation)scene.generationHistory=[...(scene.generationHistory||[]),{operation:scene.operation,model:scene.generationModel,at:new Date().toISOString()}];
-        delete scene.operation;delete scene.generationFileUri;
+        delete scene.operation;
         scene.status=scene.video?"stale":"draft";scene.checked=checks.map(()=>false);delete scene.approvedAt;
-        scene.generationError="A integração anterior foi removida. O envio remoto não foi cancelado. Confira o resultado no provedor e importe o clipe, ou gere uma nova tomada após conferir.";
+        scene.generationError="A geração direta foi retirada do estúdio. O envio remoto não foi cancelado. Confira o resultado no provedor e importe o clipe para revisão.";
         changed=true;
       }
-      remove(scene,["flowSubmission","flowMediaId"]);
-      if(data.generationProvider!=="gemini")remove(scene,["generationProvider"]);
+      remove(scene,["flowSubmission","flowMediaId","generationProvider","generationFileUri"]);
     }
   }
-  if(changed)state.events.push({at:new Date().toISOString(),text:"Integração anterior removida do estúdio. Vínculos de conta limpos; biblioteca, mídias e histórico preservados. Envios remotos não foram cancelados."});
+  if(changed)state.events.push({at:new Date().toISOString(),text:"Geração direta e vínculos de conta retirados do estúdio. Biblioteca, mídias e histórico preservados. Envios remotos não foram cancelados."});
   return changed;
 }
 
