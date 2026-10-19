@@ -1,4 +1,3 @@
-import type {FlowConnection,FlowAsset,FlowSubmission,FlowVoice} from "./useapi";
 export type FileRef = { id: string; name: string; mime: string; size: number };
 export const VIDEO_MODEL="gemini-omni-1.1-flash";
 export const VIDEO_DURATION=10;
@@ -8,12 +7,12 @@ export const visualLabels = {face:"Rosto e expressão",hair:"Cabelo",eyes:"Olhos
 export type VisualDetails = Partial<Record<keyof typeof visualLabels,string>>;
 import type {TokenUsage,CostEstimate,ReferenceReading} from "./reference";
 export type ReferenceAnalysis = {at:string;fileIds:string[];uncertainties:string[];readingId?:string;model?:string;usage?:TokenUsage;estimate?:CostEstimate};
-export type Element = { id: string; kind: "character" | "environment"; name: string; rules: string; palette: string; voice: string; voiceId: string; flowVoice?:FlowVoice&{email:string}; files: FileRef[]; approved: boolean; version: number; visualDetails?:VisualDetails;analysis?:ReferenceAnalysis };
+export type Element = { id: string; kind: "character" | "environment"; name: string; rules: string; palette: string; voice: string; voiceId: string; files: FileRef[]; approved: boolean; version: number; visualDetails?:VisualDetails;analysis?:ReferenceAnalysis };
 export type Line = { speaker: string; text: string; type: "dialogue" | "narration" };
 export const checks = ["Identidade e roupas", "Quantidade de personagens", "Ações e falas do roteiro", "Ligação com a cena anterior", "Vozes e sincronização", "Cenário, luz e áudio"];
-export type Scene = { id: string; title: string; duration: number; environment: string; characters: string[]; action: string; camera: string; lines: Line[]; sound: string; transition: "continue" | "cut"; video?: FileRef; firstFrame?: FileRef; lastFrame?: FileRef; audio?: FileRef; actualDuration?: number; width?: number; height?: number; status: "draft" | "review" | "approved" | "stale" | "generating"; checked: boolean[]; notes: string; attempts: { video: FileRef; createdAt: string }[]; operation?: string; generationError?: string; generationFileUri?:string; generationModel?:string;generationProvider?:"gemini"|"useapi";flowSubmission?:FlowSubmission;flowMediaId?:string; generationHistory?:{operation:string;model?:string;at:string}[]; audit?: { verdict: string; findings: string[]; createdAt: string }; approvedAt?: string };
+export type Scene = { id: string; title: string; duration: number; environment: string; characters: string[]; action: string; camera: string; lines: Line[]; sound: string; transition: "continue" | "cut"; video?: FileRef; firstFrame?: FileRef; lastFrame?: FileRef; audio?: FileRef; actualDuration?: number; width?: number; height?: number; status: "draft" | "review" | "approved" | "stale" | "generating"; checked: boolean[]; notes: string; attempts: { video: FileRef; createdAt: string }[]; operation?: string; generationError?: string; generationFileUri?:string; generationModel?:string;generationProvider?:"gemini"; generationHistory?:{operation:string;model?:string;at:string}[]; audit?: { verdict: string; findings: string[]; createdAt: string }; approvedAt?: string };
 export type Project = { id: string; name: string; script: string; flowProjectUrl?:string; aspect: "16:9" | "9:16"; style: string; rules: string; palette: string; scenes: Scene[]; music?: FileRef; narration?: FileRef; musicVolume: number; muteOriginal: boolean; createdAt: string };
-export type State = { elements: Element[]; projects: Project[]; selectedProject: string; revision: number; events: { at: string; text: string }[];videoProfile?:string;referenceReadings?:ReferenceReading[];videoProvider?:"gemini"|"useapi";flowConnection?:FlowConnection;flowAssets?:FlowAsset[] };
+export type State = { elements: Element[]; projects: Project[]; selectedProject: string; revision: number; events: { at: string; text: string }[];videoProfile?:string;referenceReadings?:ReferenceReading[] };
 export const uid = () => crypto.randomUUID();
 export const emptyScene = (title = "Nova cena"): Scene => ({id:uid(),title,duration:VIDEO_DURATION,environment:"",characters:[],action:"",camera:"Plano médio, movimento suave",lines:[],sound:"Som ambiente discreto. Sem trilha musical gerada por cena.",transition:"continue",status:"draft",checked:checks.map(()=>false),notes:"",attempts:[]});
 export const defaultRules = "Usar somente referências oficiais aprovadas. Preservar rosto, cabelo, idade aparente, proporções, roupa e acessórios. Não duplicar personagens. Manter arquitetura, mobiliário e iluminação do ambiente. Somente quem fala move a boca. Não gerar logotipos, legendas ou texto: aplicar a marca original na pós-produção.";
@@ -94,6 +93,33 @@ export function promptFor(p: Project,s: Scene,elements:Element[]):string{
 export function invalidate(p:Project,from:number){for(let i=from;i<p.scenes.length;i++){const s=p.scenes[i];s.status=s.video?"stale":"draft";s.checked=checks.map(()=>false);delete s.approvedAt;delete s.audit;delete s.generationFileUri;if(s.operation){delete s.operation;s.generationError="O contexto mudou durante a geração. Confira a operação original no provedor antes de gerar novamente.";}}}
 export function sceneContent(s:Scene){const {id,title,duration,environment,characters,action,camera,lines,sound,transition}=s;return JSON.stringify({id,title,duration,environment,characters,action,camera,lines,sound,transition});}
 export function seconds(n:number){return `${Math.floor(n/60).toString().padStart(2,"0")}:${Math.round(n%60).toString().padStart(2,"0")}`;}
+
+// Clean saved metadata from the retired connector without contacting any provider.
+export function migrateVideoConnector(state:State):boolean{
+  let changed=false;
+  const remove=(value:object,keys:string[])=>{const data=value as Record<string,unknown>;for(const key of keys)if(Object.hasOwn(data,key)){delete data[key];changed=true;}};
+  remove(state,["videoProvider","flowConnection","flowAssets"]);
+  for(const element of state.elements)remove(element,["flowVoice"]);
+  for(const project of state.projects){
+    for(const scene of project.scenes){
+      const data=scene as unknown as Record<string,unknown>;
+      // The prefix is recognized only to release legacy reservations on upgrade.
+      const retired=Object.hasOwn(data,"flowSubmission")||Object.hasOwn(data,"flowMediaId")||
+        (typeof data.generationProvider==="string"&&data.generationProvider!=="gemini")||scene.operation?.startsWith("useapi/");
+      if(retired&&(scene.operation||scene.status==="generating")){
+        if(scene.operation)scene.generationHistory=[...(scene.generationHistory||[]),{operation:scene.operation,model:scene.generationModel,at:new Date().toISOString()}];
+        delete scene.operation;delete scene.generationFileUri;
+        scene.status=scene.video?"stale":"draft";scene.checked=checks.map(()=>false);delete scene.approvedAt;
+        scene.generationError="A integração anterior foi removida. O envio remoto não foi cancelado. Confira o resultado no provedor e importe o clipe, ou gere uma nova tomada após conferir.";
+        changed=true;
+      }
+      remove(scene,["flowSubmission","flowMediaId"]);
+      if(data.generationProvider!=="gemini")remove(scene,["generationProvider"]);
+    }
+  }
+  if(changed)state.events.push({at:new Date().toISOString(),text:"Integração anterior removida do estúdio. Vínculos de conta limpos; biblioteca, mídias e histórico preservados. Envios remotos não foram cancelados."});
+  return changed;
+}
 
 export function migrateVideoProfile(state:State):boolean{
   if(state.videoProfile===VIDEO_PROFILE)return false;

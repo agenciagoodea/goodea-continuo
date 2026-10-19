@@ -9,10 +9,9 @@ const coreUrl=url(compile(readFileSync(new URL('../lib/core.ts',import.meta.url)
 const c=await import(coreUrl);
 const referenceUrl=url(compile(readFileSync(new URL('../lib/reference.ts',import.meta.url),'utf8')));
 const httpUrl=url(compile(readFileSync(new URL('../lib/http.ts',import.meta.url),'utf8')));
-const useapiUrl=url(compile(readFileSync(new URL('../lib/useapi.ts',import.meta.url),'utf8').replace('"./core"',JSON.stringify(coreUrl))));
 const omniUrl=url(compile(readFileSync(new URL('../lib/omni.ts',import.meta.url),'utf8').replace('"./core"',JSON.stringify(coreUrl))));
 class ApiError extends Error{constructor(message,status=400){super(message);this.status=status;}}
-const h={z,ApiError,data:null,calls:0,google:null,flowFetch:null};globalThis.__continuoTest=h;
+const h={z,ApiError,data:null,calls:0,google:null};globalThis.__continuoTest=h;
 const serverUrl=url(`const h=globalThis.__continuoTest;
 export const ApiError=h.ApiError;
 export async function owner(){return 'owner';}
@@ -29,15 +28,19 @@ export async function fileBytes(id,ref){return {bytes:new Uint8Array([1,2]).buff
 export async function putFile(){return {id:'generated',name:'video.mp4',mime:'video/mp4',size:100};}
 export async function downloadGoogleVideo(){return new ArrayBuffer(1);}
 `);
-let flowServer=readFileSync(new URL('../lib/useapi-server.ts',import.meta.url),'utf8');
-flowServer=flowServer.replace('import {env} from "./runtime";','const env={};const fetch=(...args)=>globalThis.__continuoTest.flowFetch(...args);').replace('"./server"',JSON.stringify(serverUrl)).replace('"./core"',JSON.stringify(coreUrl)).replace('"./http"',JSON.stringify(httpUrl)).replace('"./useapi"',JSON.stringify(useapiUrl));
-const flowServerUrl=url(compile(flowServer));
 let route=readFileSync(new URL('../app/api/studio/route.ts',import.meta.url),'utf8');
-route=route.replace('import { env } from "../../../lib/runtime";','const env={};').replace('import { z } from "zod";','const {z}=globalThis.__continuoTest;').replace('"../../../lib/server"',JSON.stringify(serverUrl)).replace('"../../../lib/core"',JSON.stringify(coreUrl)).replace('"../../../lib/omni"',JSON.stringify(omniUrl)).replace('"../../../lib/reference"',JSON.stringify(referenceUrl)).replace('"../../../lib/useapi-server"',JSON.stringify(flowServerUrl));
+route=route.replace('import { env } from "../../../lib/runtime";','const env={};').replace('import { z } from "zod";','const {z}=globalThis.__continuoTest;').replace('"../../../lib/server"',JSON.stringify(serverUrl)).replace('"../../../lib/core"',JSON.stringify(coreUrl)).replace('"../../../lib/omni"',JSON.stringify(omniUrl)).replace('"../../../lib/reference"',JSON.stringify(referenceUrl));
 const api=await import(url(compile(route)));
-function reset(){h.data=c.initialState();h.calls=0;h.flowFetch=null;for(const e of h.data.elements){e.approved=true;e.files=[{id:e.id+'image',name:'reference.png',mime:'image/png',size:1}];}return h.data.projects[0];}
-async function action(type,payload={},sceneIndex=0,revision=h.data.revision){const p=h.data.projects[0];const response=await api.POST(new Request('https://test/api/studio',{method:'POST',headers:{'x-useapi-key':'fake-test-useapi-token'},body:JSON.stringify({type,payload,revision,projectId:p.id,sceneId:p.scenes[sceneIndex]?.id})}));return {status:response.status,data:await response.json()};}
+function reset(){h.data=c.initialState();h.calls=0;for(const e of h.data.elements){e.approved=true;e.files=[{id:e.id+'image',name:'reference.png',mime:'image/png',size:1}];}return h.data.projects[0];}
+async function action(type,payload={},sceneIndex=0,revision=h.data.revision){const p=h.data.projects[0];const response=await api.POST(new Request('https://test/api/studio',{method:'POST',body:JSON.stringify({type,payload,revision,projectId:p.id,sceneId:p.scenes[sceneIndex]?.id})}));return {status:response.status,data:await response.json()};}
 const ref={id:'video',name:'clip.mp4',mime:'video/mp4',size:1},frame={id:'frame',name:'frame.png',mime:'image/png',size:1};
+test('ações do conector retirado são recusadas sem alterar o estúdio nem chamar o Google',async()=>{
+  reset();const before=structuredClone(h.data);
+  for(const type of ['flowAccounts','connectFlow','disconnectFlow','setVideoProvider','recoverFlowJob','releaseFlowSubmission']){
+    const r=await action(type,{email:'old@example.com',provider:'useapi',jobId:'j-old'});assert.equal(r.status,400);assert.match(r.data.error,/Operação desconhecida/);
+  }
+  assert.deepEqual(h.data,before);assert.equal(h.calls,0);
+});
 test('API bloqueia geração da segunda cena sem predecessor aprovado',async()=>{reset();const r=await action('generate',{},1);assert.equal(r.status,400);assert.equal(h.calls,0);});
 test('API não permite aprovar com checklist incompleto',async()=>{const p=reset();Object.assign(p.scenes[0],{video:ref,firstFrame:frame,lastFrame:frame,status:'review',actualDuration:10,width:1280,height:720});const r=await action('review',{checked:c.checks.map(()=>false),notes:'',approve:true});assert.equal(r.status,400);assert.notEqual(h.data.projects[0].scenes[0].status,'approved');});
 test('API aprova e desbloqueia continuação; alterar a direção revoga aprovação',async()=>{const p=reset();Object.assign(p.scenes[0],{video:ref,firstFrame:frame,lastFrame:frame,status:'review',actualDuration:10,width:1280,height:720});let r=await action('review',{checked:c.checks.map(()=>true),notes:'Conferido',approve:true});assert.equal(r.status,200);assert.equal(h.data.projects[0].scenes[0].status,'approved');assert.deepEqual(c.preflight(h.data.projects[0],h.data.projects[0].scenes[1],h.data.elements),[]);const s=h.data.projects[0].scenes[0];r=await action('saveScene',{...s,action:'Outra ação'});assert.equal(r.status,200);assert.equal(h.data.projects[0].scenes[0].status,'stale');});
@@ -90,74 +93,4 @@ test('nova referência envia uma nova leitura e preserva resultados anteriores',
 test('resultado de leitura não sobrescreve alterações feitas por outra aba',async()=>{
   reset();h.google=async()=>{h.data.projects[0].name='Episódio renomeado em outra aba';h.data.revision++;return {text:JSON.stringify(referenceResult)};};
   const r=await action('analyzeElement',sheet);assert.equal(r.status,200);assert.equal(r.data.state.projects[0].name,'Episódio renomeado em outra aba');assert.equal(h.data.referenceReadings[0].status,'complete');
-});
-
-const flowEmail='studio@example.com';
-const linkedAccount={health:'OK',backend:'flow',project:{projectId:'flow-project',projectTitle:'Episódio'},credits:{credits:1000},models:{videoModels:[{key:'omni_flash_t2v',displayName:'Omni 1.1 Flash',resolution:'720p'}]},accountCookies:[{name:'secret',value:'canary-private-cookie'}],sessionData:{access_token:'canary-private-access'}};
-function withFlow(){const p=reset();h.data.videoProvider='useapi';h.data.flowConnection={email:flowEmail,health:'OK',backend:'flow',projectId:'flow-project',credits:1000,supportsOmni:true,voices:[{ref:'Puck',name:'Puck',source:'system'}],verifiedAt:new Date().toISOString()};return p;}
-const json=Response.json;
-function defaultFlowFetch(extra){let uploads=0;return async(value,options={})=>{const u=new URL(String(value));if(extra){const r=await extra(u,options);if(r)return r;}if(u.pathname.includes('/accounts/'))return json(linkedAccount);if(u.pathname.includes('/assets/')&&options.method==='POST')return json({email:flowEmail,mediaGenerationId:{mediaGenerationId:`user:1-email:abc-image:img${++uploads}`}});if(u.pathname.endsWith('/videos')&&options.method==='POST')return json({jobid:'j12345-video-flow',status:'created',type:'video'},{status:201});throw new Error('Unexpected mock request '+u.pathname);};}
-function runningFlow(p){const s=p.scenes[0];s.operation='useapi/j12345-video-flow';s.status='generating';s.generationProvider='useapi';s.flowSubmission={ref:'submission-ref',email:flowEmail,at:new Date().toISOString(),stage:'submitted',jobId:'j12345-video-flow'};return s;}
-function completedFlow(){return {jobid:'j12345-video-flow',type:'video',status:'completed',request:{email:flowEmail,model:'omni-flash',replyRef:'submission-ref'},response:{remainingCredits:985,media:[{mediaGenerationId:'user:1-email:abc-video:clip',video:{generatedVideo:{model:'omni_flash_r2v'}},mediaMetadata:{mediaStatus:{mediaGenerationStatus:'MEDIA_GENERATION_STATUS_SUCCESSFUL'}},videoUrl:'https://flow-content.google/video/clip?signature=fake'}]}};}
-test('listagem e conexão Flow nunca devolvem cookies, access token ou API token',async()=>{
-  reset();h.flowFetch=async(value)=>{const u=new URL(String(value));if(u.pathname.endsWith('/accounts'))return json({[flowEmail]:linkedAccount});if(u.pathname.includes('/accounts/'))return json(linkedAccount);if(u.pathname.endsWith('/voices'))return json({voices:[{voice:'Puck',displayName:'Puck',source:'system',sessionCookies:'canary-private-voice'}]});throw new Error('unexpected');};
-  const listed=await action('flowAccounts');assert.equal(listed.status,200);assert.equal(listed.data.accounts[0].email,flowEmail);assert.doesNotMatch(JSON.stringify(listed.data),/canary-private|accountCookies|access_token|fake-test-useapi-token/);
-  const connected=await action('connectFlow',{email:flowEmail});assert.equal(connected.status,200);assert.equal(connected.data.state.videoProvider,'useapi');assert.equal(connected.data.state.flowConnection.supportsOmni,true);assert.equal(connected.data.state.flowConnection.voices[0].ref,'Puck');assert.doesNotMatch(JSON.stringify(connected.data),/canary-private|accountCookies|access_token|fake-test-useapi-token/);
-});
-test('Flow reserva antes dos uploads e trava Omni Flash 10s 720p em modo ingredientes',async()=>{
-  const p=withFlow();let body,paid=0;const revision=h.data.revision;
-  h.flowFetch=defaultFlowFetch(async(u,o)=>{assert.ok(o.headers?.Authorization==='Bearer fake-test-useapi-token');if(o.method==='POST'){assert.equal(h.data.projects[0].scenes[0].operation,'useapi/submitting');}if(u.pathname.endsWith('/videos')){paid++;body=JSON.parse(o.body);const duplicate=await action('generate',{},0,revision);assert.equal(duplicate.status,409);}});
-  const r=await action('generate',{model:'veo-3.1-fast',duration:8,resolution:'360p'});assert.equal(r.status,200);assert.equal(paid,1);assert.equal(body.model,'omni-flash');assert.equal(body.duration,10);assert.equal(body.resolution,'720p');assert.equal(body.count,1);assert.equal(body.async,true);assert.equal(body.email,flowEmail);assert.equal(body.aspectRatio,'landscape');assert.ok(body.referenceImage_1&&body.referenceImage_2&&body.referenceImage_3);assert.ok(!body.startImage);assert.match(body.prompt,/@referenceImage_1/);assert.equal(h.calls,0);assert.equal(r.data.state.projects[0].scenes[0].operation,'useapi/j12345-video-flow');
-});
-test('continuação Flow envia somente o frame final aprovado e respeita 9:16',async()=>{
-  const p=withFlow();p.aspect='9:16';p.scenes[0].status='approved';p.scenes[0].lastFrame=frame;let body,uploads=0;
-  h.flowFetch=defaultFlowFetch((u,o)=>{if(o.method==='POST'&&u.pathname.includes('/assets/'))uploads++;if(u.pathname.endsWith('/videos'))body=JSON.parse(o.body);});
-  const r=await action('generate',{},1);assert.equal(r.status,200);assert.equal(uploads,1);assert.equal(body.aspectRatio,'portrait');assert.ok(body.startImage);assert.ok(!Object.keys(body).some(k=>/^(referenceImage|referenceAudio|character)_/.test(k)));assert.match(body.prompt,/exact last frame/);
-});
-test('upload parcial é reaproveitado ao repetir manualmente após falha, sem geração duplicada',async()=>{
-  withFlow();let uploads=0,videos=0,first=true;
-  h.flowFetch=defaultFlowFetch((u,o)=>{if(o.method==='POST'&&u.pathname.includes('/assets/')){uploads++;if(uploads===2&&first){first=false;return json({error:'USER_REQUESTS_THROTTLED'},{status:429});}}if(u.pathname.endsWith('/videos'))videos++;});
-  const failed=await action('generate');assert.equal(failed.status,502);assert.equal(videos,0);assert.equal(h.data.flowAssets.length,1);assert.ok(!h.data.projects[0].scenes[0].operation);
-  assert.equal((await action('generate')).status,200);assert.equal(uploads,4);assert.equal(videos,1);
-});
-test('timeout de envio Flow fica reservado e nunca repete o POST de geração',async()=>{
-  withFlow();let paid=0;h.flowFetch=defaultFlowFetch((u,o)=>{if(u.pathname.endsWith('/videos')){paid++;throw new Error('network timeout');}});
-  const r=await action('generate');assert.equal(r.status,502);assert.equal(h.data.projects[0].scenes[0].operation,'useapi/unknown');assert.equal(h.data.projects[0].scenes[0].flowSubmission.stage,'uncertain');assert.equal((await action('generate')).status,400);assert.equal(paid,1);
-  const pending=await action('poll');assert.equal(pending.status,200);assert.equal(pending.data.pending,true);assert.equal(paid,1);
-});
-test('consulta Flow concluída importa vídeo sem enviar token à CDN e sem aprovar a cena',async()=>{
-  const p=withFlow();runningFlow(p);let downloads=0;
-  h.flowFetch=async(value,o={})=>{const u=new URL(String(value));assert.ok(o.method!=='POST');if(u.pathname.includes('/jobs/'))return json(completedFlow());if(u.hostname==='flow-content.google'){downloads++;assert.equal(o.headers,undefined);return new Response(new Uint8Array([0,1,2]),{headers:{'content-type':'video/mp4'}});}throw new Error('unexpected');};
-  const r=await action('poll');assert.equal(r.status,200);const s=r.data.state.projects[0].scenes[0];assert.equal(s.status,'review');assert.equal(s.video.id,'generated');assert.equal(s.operation,undefined);assert.equal(s.lastFrame,undefined);assert.equal(downloads,1);assert.equal(r.data.state.flowConnection.credits,985);assert.equal(h.calls,0);
-});
-test('download sem URL usa a recuperação documentada do arquivo, sem nova geração',async()=>{
-  const p=withFlow();runningFlow(p);let raw=0;
-  h.flowFetch=async(value,o={})=>{const u=new URL(String(value));assert.ok(o.method!=='POST');if(u.pathname.includes('/jobs/')){const data=completedFlow();delete data.response.media[0].videoUrl;return json(data);}if(u.searchParams.get('raw')==='true'){raw++;assert.equal(o.headers.Authorization,'Bearer fake-test-useapi-token');return new Response(new Uint8Array([0,1]),{headers:{'content-type':'video/mp4'}});}if(u.pathname.includes('/assets/'))return json({error:'link not available'},{status:503});throw new Error('unexpected');};
-  assert.equal((await action('poll')).status,200);assert.equal(raw,1);
-});
-test('job Flow com falha mostra a causa e não é reiniciado pela consulta',async()=>{
-  const p=withFlow();runningFlow(p);let reads=0;
-  h.flowFetch=async(value,o={})=>{reads++;assert.ok(o.method!=='POST');return json({jobid:'j12345-video-flow',type:'video',status:'failed',request:{email:flowEmail,model:'omni-flash'},error:'All operations failed',response:{failureReasons:['PUBLIC_ERROR_AUDIO_FILTERED']}});};
-  const r=await action('poll');assert.equal(r.status,502);assert.match(r.data.error,/PUBLIC_ERROR_AUDIO_FILTERED/);assert.equal(r.data.state.projects[0].scenes[0].operation,undefined);assert.equal(r.data.state.projects[0].scenes[0].status,'draft');assert.equal(reads,1);
-});
-test('job de outro modelo e download fora dos domínios Google são bloqueados',async()=>{
-  const p=withFlow();runningFlow(p);let cdn=false;
-  h.flowFetch=async(value)=>{const u=new URL(String(value));if(!u.pathname.includes('/jobs/'))cdn=true;const data=completedFlow();data.request.model='veo-3.1-fast';return json(data);};
-  assert.ok((await action('poll')).status>=400);assert.equal(cdn,false);assert.ok(h.data.projects[0].scenes[0].operation);
-  h.flowFetch=async(value)=>{const u=new URL(String(value));if(!u.pathname.includes('/jobs/'))cdn=true;const data=completedFlow();data.response.media[0].videoUrl='https://127.0.0.1/private';return json(data);};
-  assert.ok((await action('poll')).status>=400);assert.equal(cdn,false);
-});
-test('conta antiga ou sem Omni é bloqueada antes de consumir uma geração',async()=>{
-  withFlow();let paid=0;h.flowFetch=defaultFlowFetch(u=>{if(u.pathname.endsWith('/videos'))paid++;if(u.pathname.includes('/accounts/'))return json({...linkedAccount,backend:'labs'});});
-  assert.equal((await action('generate')).status,400);assert.equal(paid,0);
-});
-test('recuperação verifica a referência do envio e recusa jobs de outra cena',async()=>{
-  const p=withFlow(),s=runningFlow(p);s.operation='useapi/unknown';s.flowSubmission.stage='uncertain';s.flowSubmission.at='2026-10-01T00:00:00Z';
-  h.flowFetch=async()=>json({...completedFlow(),status:'started',request:{model:'omni-flash',email:flowEmail,replyRef:'other-submission'}});
-  assert.equal((await action('recoverFlowJob',{jobId:'j12345-video-flow'})).status,400);assert.equal(h.data.projects[0].scenes[0].operation,'useapi/unknown');
-  h.flowFetch=async()=>json({...completedFlow(),status:'started'});
-  const r=await action('recoverFlowJob',{jobId:'j12345-video-flow'});assert.equal(r.status,200);assert.equal(r.data.pending,true);assert.equal(r.data.state.projects[0].scenes[0].operation,'useapi/j12345-video-flow');
-});
-test('remover seleção do Flow não apaga contas do provedor nem muda biblioteca',async()=>{
-  withFlow();const before=structuredClone(h.data.elements);h.flowFetch=()=>{throw new Error('No provider call expected');};const r=await action('disconnectFlow');assert.equal(r.status,200);assert.equal(r.data.state.flowConnection,undefined);assert.equal(r.data.state.videoProvider,'gemini');assert.deepEqual(r.data.state.elements,before);
 });

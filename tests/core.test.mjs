@@ -18,3 +18,34 @@ test('referência desconhecida vira pendência e não identidade inventada',()=>
 
 test('migração para Omni mantém biblioteca e vídeos e invalida tomadas antigas',()=>{const state=c.initialState();delete state.videoProfile;const p=state.projects[0];p.scenes[0].duration=8;p.scenes[0].status='approved';p.scenes[0].video={id:'old',name:'old.mp4',mime:'video/mp4',size:1};const elements=JSON.stringify(state.elements);assert.equal(c.migrateVideoProfile(state),true);assert.ok(p.scenes.every(s=>s.duration===10));assert.equal(p.scenes[0].status,'stale');assert.equal(p.scenes[0].video.id,'old');assert.equal(JSON.stringify(state.elements),elements);assert.equal(c.migrateVideoProfile(state),false);});
 test('migração preserva o identificador de uma operação anterior sem consultar o modelo antigo',()=>{const state=c.initialState();delete state.videoProfile;const s=state.projects[0].scenes[0];s.operation='old-provider-operation';s.status='generating';assert.equal(c.migrateVideoProfile(state),true);assert.equal(s.operation,undefined);assert.equal(s.generationHistory[0].operation,'old-provider-operation');assert.equal(s.duration,10);assert.equal(s.status,'draft');assert.ok(state.events.some(e=>e.text.includes('não foi cancelada no provedor')));});
+
+test('retirada do conector limpa os vínculos e preserva a biblioteca e uma tomada aprovada',()=>{
+  const {state,p}=ready();state.videoProvider='useapi';state.flowConnection={email:'old@example.com'};state.flowAssets=[{id:'remote-image'}];
+  const element=state.elements[0];element.voice='Voz oficial';element.voiceId='preset-oficial';element.flowVoice={ref:'remote-voice'};
+  const scene=p.scenes[0];Object.assign(scene,{status:'approved',video:{id:'saved-video'},firstFrame:{id:'first'},lastFrame:{id:'last'},audio:{id:'official-audio'},checked:c.checks.map(()=>true),approvedAt:'today',generationProvider:'useapi',flowMediaId:'remote-video'});
+  const originalScene=structuredClone(scene),originalElement=structuredClone(element);
+  assert.equal(c.migrateVideoConnector(state),true);
+  for(const key of ['videoProvider','flowConnection','flowAssets'])assert.ok(!(key in state));
+  assert.ok(!('flowVoice' in element));assert.equal(element.voiceId,originalElement.voiceId);assert.equal(element.voice,originalElement.voice);assert.deepEqual(element.files,originalElement.files);assert.equal(element.approved,true);
+  for(const key of ['status','video','firstFrame','lastFrame','audio','checked','approvedAt'])assert.deepEqual(scene[key],originalScene[key]);
+  assert.ok(!('generationProvider' in scene));assert.ok(!('flowMediaId' in scene));
+  assert.equal(c.migrateVideoConnector(state),false);
+});
+test('reservas antigas são arquivadas e liberadas sem apagar tomadas ou reenviar geração',()=>{
+  for(const operation of ['useapi/job-123','useapi/unknown','useapi/submitting']){
+    const {state,p}=ready(),scene=p.scenes[0];Object.assign(scene,{status:'generating',operation,generationProvider:'useapi',flowSubmission:{ref:'old-submission'},generationFileUri:'https://old.invalid/video'});
+    if(operation.endsWith('unknown'))scene.video={id:'previous-take'};
+    assert.equal(c.migrateVideoConnector(state),true);assert.equal(scene.operation,undefined);assert.equal(scene.generationFileUri,undefined);assert.equal(scene.status,scene.video?'stale':'draft');assert.ok(!('flowSubmission' in scene));assert.equal(scene.generationHistory[0].operation,operation);assert.match(scene.generationError,/não foi cancelado/);
+    if(scene.video)assert.equal(scene.video.id,'previous-take');
+    assert.equal(c.migrateVideoConnector(state),false);assert.equal(scene.generationHistory.length,1);
+  }
+});
+test('uma reserva legada sem metadados também deixa de bloquear o estúdio',()=>{
+  const {state,p}=ready();p.scenes[0].operation='useapi/job-old';p.scenes[0].status='generating';
+  assert.equal(c.migrateVideoConnector(state),true);assert.equal(p.scenes[0].operation,undefined);assert.equal(p.scenes[0].status,'draft');
+});
+test('limpeza de conta antiga não interrompe geração da Gemini API',()=>{
+  const {state,p}=ready();state.flowConnection={email:'old@example.com'};
+  const scene=p.scenes[0];Object.assign(scene,{status:'generating',operation:'interactions/current',generationProvider:'gemini',generationFileUri:'https://storage.googleapis.com/current'});
+  const before=structuredClone(scene);assert.equal(c.migrateVideoConnector(state),true);assert.deepEqual(scene,before);assert.equal(c.migrateVideoConnector(state),false);
+});

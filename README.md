@@ -1,6 +1,6 @@
 # Contínuo — Goodea Studio
 
-Versão para usar no próprio computador. Biblioteca de personagens e ambientes, análise automática de fichas, roteiro, cenas de 10 segundos, geração pelo Google Flow via useapi.net, continuidade por frame, revisão e montagem.
+Versão para usar no próprio computador. Biblioteca de personagens e ambientes, análise automática de fichas, roteiro, cenas de 10 segundos, produção assistida no Google Flow, continuidade por frame, revisão e montagem.
 
 O perfil de vídeo permanece fixo: **Omni Flash · 10s · 720p**, com escolha entre **16:9** (1280×720) e **9:16** (720×1280).
 
@@ -28,23 +28,26 @@ npm start
 
 Depois, abra http://127.0.0.1:3000. Para desenvolvimento, use `npm run dev`.
 
-## Conectar o Google Flow
+## Usar o Google Flow no modo assistido
 
-1. Abra **Integrações → Google Flow via useapi.net**.
-2. Informe seu API token da useapi.net. Ele é diferente da chave Gemini.
-3. Use **Abrir login guiado**. No site do fornecedor, abra **Automated setup → Open automated setup**, informe o token e faça o login Google no navegador remoto fornecido por ele.
-4. Volte ao Contínuo, clique em **Atualizar contas**, escolha a conta e clique em **Verificar e usar esta conta**.
-5. No Estúdio, clique em **Gerar no Google Flow**, ou ative a produção sequencial. A sequência pausa em cada revisão e precisa da aba aberta.
+1. Abra **Integrações → Produção assistida no Flow** e entre na sua conta pelo botão **Entrar no Google Flow**. O login acontece no próprio Google.
+2. Se quiser, salve o link do projeto para abrir um atalho a partir do estúdio.
+3. Aprove as fichas oficiais e prepare a cena. No Estúdio, baixe **Pacote para o Flow**.
+4. No Flow, selecione Omni Flash, 10 segundos, 720p e o formato do projeto. Envie as referências e cole o prompt do pacote.
+5. Nas continuações, use **CONTINUIDADE-frame-inicial.png** como primeiro frame. Ele vem do último frame da cena anterior aprovada.
+6. Baixe o vídeo do Flow, use **Importar vídeo** no Contínuo e revise. A aprovação libera a próxima cena.
 
-A useapi.net é um fornecedor independente, com assinatura própria, que mantém uma sessão autenticada da sua conta Google. Os clipes consomem seus créditos Flow. O fornecedor recomenda conta dedicada e informa que abrir o mesmo login diretamente no Flow pode invalidar a sessão da integração. O Contínuo não solicita senha, código de verificação ou cookies Google.
+O Contínuo não compartilha a sessão Google nem envia gerações automaticamente ao Flow. Não solicita token de intermediário, senha, código de verificação ou cookies Google. Use faixas oficiais de áudio na montagem para uniformizar as vozes.
 
-As vozes disponíveis na conta vinculada aparecem nas fichas dos personagens. Na abertura ou em cortes, podem ser enviados até 7 imagens oficiais e até 5 referências de voz. **Na continuação direta, a API aceita somente o último frame aprovado como imagem inicial**, sem referências adicionais de imagem ou voz; as regras das fichas permanecem no texto. Use as faixas oficiais na montagem para uniformizar as vozes do episódio.
+## Geração direta pela Gemini API
 
-O sistema reserva cada envio antes da geração e guarda o job para consulta. Consultar, recuperar o job ou baixar novamente não envia outro pedido de geração. Falhas interrompem a sequência. Não existe troca automática para outro modelo ou para outra modalidade de cobrança.
+A opção **Gerar com Omni Flash** usa a chave Gemini configurada em Integrações, com acesso e cobrança próprios do projeto Google. Os créditos e a assinatura do Flow não pagam essa API. O modo assistido não exige uma chave para preparar pacotes e importar os resultados.
+
+Na geração direta, o sistema reserva cada envio e guarda o identificador para consulta. Consultar ou baixar novamente não envia outro pedido de geração. A produção sequencial usa essa API, precisa da aba aberta e pausa para revisão de cada cena. Não há troca automática de modelo ou de modalidade de cobrança.
 
 ## Analisar as fichas dos personagens
 
-A análise usa a **Gemini API**, separadamente da useapi.net e dos créditos Flow. Em Integrações, informe a chave Gemini; depois abra a Biblioteca oficial e envie a imagem. A leitura automática preenche um rascunho para conferência e aprovação.
+A análise usa a **Gemini API**, separadamente dos créditos Flow. Em Integrações, informe a chave Gemini; depois abra a Biblioteca oficial e envie a imagem. A leitura automática preenche um rascunho para conferência e aprovação.
 
 Há contagem de tokens de entrada antes da análise e consumo informado pelo Google após ela. O custo mostrado é estimado. Leituras concluídas podem ser recuperadas sem gerar novamente. Salvar uma ficha não executa outra análise.
 
@@ -54,11 +57,12 @@ Você pode informar as chaves pela interface, onde ficam somente na memória da 
 
 ```dotenv
 GEMINI_API_KEY=sua_chave_gemini
-USEAPI_TOKEN=seu_token_useapi
 CONTINUO_DATA_DIR=
 ```
 
 Campos vazios são permitidos. Para produção assistida e cadastro manual, não é preciso informar as chaves. Reinicie o servidor depois de alterar `.env.local`.
+
+Ao atualizar uma instalação anterior, o sistema limpa automaticamente os vínculos do conector retirado e libera reservas antigas. Biblioteca, clipes, frames e histórico são preservados; os envios remotos não são cancelados. Confira qualquer tentativa pendente no provedor antes de gerar novamente. Remova do seu `.env.local` o token antigo, caso o tenha configurado; ele não é mais lido pela aplicação.
 
 `.env.local`, banco, uploads e backups ficam fora do Git. As chamadas de geração e análise continuam dependendo de internet, acesso aos modelos e saldo nos respectivos fornecedores.
 
@@ -96,8 +100,6 @@ Se a porta 3000 estiver ocupada, encerre outro programa que esteja usando essa p
 
 Exportado da versão Contínuo publicada em 16/10/2026, fonte `3f1f8f5f7cd3b07e3b7b437026a14192801a054c`. A distribuição local substitui os serviços de hospedagem por SQLite e arquivos locais, preservando o estúdio e as integrações.
 
-- https://useapi.net/docs/api-google-flow-v1
-- https://useapi.net/docs/start-here/setup-google-flow
-- https://useapi.net/docs/api-google-flow-v1/post-google-flow-videos
+- https://flow.google.com/
 - https://ai.google.dev/gemini-api/docs/omni
 - https://ai.google.dev/gemini-api/docs/api-key
